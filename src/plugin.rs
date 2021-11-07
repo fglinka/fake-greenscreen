@@ -6,13 +6,17 @@ use gstreamer::Caps;
 use gstreamer_base::subclass::base_transform::BaseTransformMode;
 use gstreamer_base::subclass::prelude::*;
 use gstreamer_video::prelude::*;
+use gstreamer_video::VideoInfo;
 use once_cell::sync::Lazy;
 
 mod imp {
     use super::*;
 
     #[derive(Default)]
-    pub struct FakecamTransform {}
+    pub struct FakecamTransform {
+        video_info_in: VideoInfo,
+        video_info_out: VideoInfo
+    }
 
     #[glib::object_subclass]
     impl ObjectSubclass for FakecamTransform {
@@ -78,6 +82,14 @@ mod imp {
         const PASSTHROUGH_ON_SAME_CAPS: bool = false;
         const TRANSFORM_IP_ON_PASSTHROUGH: bool = false;
 
+        fn set_caps(
+            &self,
+            _element: &Self::Type,
+            incaps: &Caps,
+            outcaps: &Caps
+        ) -> Result<(), gstreamer::LoggableError) {
+            video_info_in
+        }
         fn transform_ip(
             &self,
             _element: &Self::Type,
