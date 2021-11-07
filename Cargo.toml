@@ -5,6 +5,7 @@ edition = "2018"
 license = "MIT OR Apache-2.0"
 authors = ["Felix Glinka <devglinka@posteo.eu>"]
 repository = "https://github.com/fglinka/fake-greenscreen"
+publish = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
