@@ -1,21 +1,53 @@
+use crate::filter::FilterError;
+use core::ffi::c_void;
 use gstreamer::glib;
 use gstreamer::prelude::*;
 use gstreamer::subclass::prelude::*;
 use gstreamer::subclass::ElementMetadata;
 use gstreamer::Caps;
+use gstreamer::FlowError;
 use gstreamer_base::subclass::base_transform::BaseTransformMode;
 use gstreamer_base::subclass::prelude::*;
-use gstreamer_video::prelude::*;
-use gstreamer_video::VideoInfo;
+use gstreamer_video::{VideoFormat, VideoFrameRef, VideoInfo};
 use once_cell::sync::Lazy;
+use opencv::prelude::*;
+use std::sync::Mutex;
+
+static FILTER_ERROR_CAT: Lazy<gstreamer::DebugCategory> = Lazy::new(|| {
+    gstreamer::DebugCategory::new(
+        "fakecam",
+        gstreamer::DebugColorFlags::empty() | gstreamer::DebugColorFlags::FG_RED,
+        Some("Fake green-screen plugin error"),
+    )
+});
+
+impl Into<gstreamer::LoggableError> for FilterError {
+    fn into(self) -> gstreamer::LoggableError {
+        gstreamer::loggable_error!(&*FILTER_ERROR_CAT, format!("Filter error: {}", self))
+    }
+}
 
 mod imp {
     use super::*;
 
-    #[derive(Default)]
+    #[derive(Debug)]
     pub struct FakecamTransform {
-        video_info_in: VideoInfo,
-        video_info_out: VideoInfo
+        video_info: Mutex<VideoInfo>,
+    }
+
+    impl Default for FakecamTransform {
+        fn default() -> Self {
+            let fmt = VideoFormat::Rgb;
+            let width: u32 = 1920;
+            let height: u32 = 1080;
+            FakecamTransform {
+                video_info: Mutex::new(
+                    VideoInfo::builder(fmt, width, height)
+                        .build()
+                        .expect("Default video info for transform was invalid."),
+                ),
+            }
+        }
     }
 
     #[glib::object_subclass]
@@ -86,15 +118,79 @@ mod imp {
             &self,
             _element: &Self::Type,
             incaps: &Caps,
-            outcaps: &Caps
-        ) -> Result<(), gstreamer::LoggableError) {
-            video_info_in
+            outcaps: &Caps,
+        ) -> Result<(), gstreamer::LoggableError> {
+            let mut info = self.video_info.lock().unwrap();
+            let info_in = VideoInfo::from_caps(incaps)?;
+            let info_out = VideoInfo::from_caps(outcaps)?;
+            if info_in != info_out {
+                Err(gstreamer::loggable_error!(
+                    &*FILTER_ERROR_CAT,
+                    format!(
+                        "Input and output caps different. Input {:?}, Outoput {:?}",
+                        info_in, info_out
+                    )
+                ))
+            } else {
+                *info = info_in;
+                Ok(())
+            }
         }
         fn transform_ip(
             &self,
             _element: &Self::Type,
             buf: &mut gstreamer::BufferRef,
-        ) -> Result<gstreamer::FlowSuccess, gstreamer::FlowError> {
+        ) -> Result<gstreamer::FlowSuccess, FlowError> {
+            // Obtain lock on video info
+            let info = self.video_info.lock().or_else(|e| {
+                gstreamer::gst_error!(&*FILTER_ERROR_CAT, "Failed to obtain mutex lock");
+                Err(FlowError::Error)
+            })?;
+            // Read out buffer as gstreamer-video VideoFrame
+            let mut frame = VideoFrameRef::from_buffer_ref_writable(buf, &*info).or_else(|e| {
+                gstreamer::gst_error!(&*FILTER_ERROR_CAT, "Failed to extract video frame: {}", e);
+                Err(FlowError::Error)
+            })?;
+            //println!("Frame: {:?} {}x{}x{}", frame.format(), frame.width(), frame.height(), frame.n_components());
+            if frame.n_planes() != 1 {
+                gstreamer::gst_error!(
+                    &*FILTER_ERROR_CAT,
+                    "Extracted frame has {} planes, should have 1",
+                    frame.n_planes()
+                );
+                return Err(FlowError::Error);
+            }
+            // Obtain mutable pointer to the single plane containing the image data
+            let frame_data_ptr: *mut u8 = frame
+                .plane_data_mut(0)
+                .map(|data| data.as_mut_ptr())
+                .or_else(|e| {
+                    gstreamer::gst_error!(
+                        &*FILTER_ERROR_CAT,
+                        "Failed to read out frame plane: {}",
+                        e
+                    );
+                    Err(FlowError::Error)
+                })?;
+            let frame_mat = unsafe {
+                opencv::core::Mat::new_rows_cols_with_data(
+                    frame.height() as i32,
+                    frame.width() as i32,
+                    opencv::core::CV_8UC3,
+                    frame_data_ptr as *mut c_void,
+                    opencv::core::Mat_AUTO_STEP,
+                )
+            }
+            .or_else(|e| {
+                gstreamer::gst_error!(&*FILTER_ERROR_CAT, "Failed to decode as CV Mat: {}", e);
+                Err(FlowError::Error)
+            })?;
+            //println!("Mat: {}x{}x{}", frame_mat.cols(), frame_mat.rows(), frame_mat.channels().unwrap());
+            //let mut mat_rgb = opencv::core::Mat::default();
+            //opencv::imgproc::cvt_color(&frame_mat, &mut mat_rgb, opencv::imgproc::COLOR_RGB2BGR, 0).unwrap();
+            //opencv::highgui::imshow("preview", &mat_rgb).unwrap();
+            //opencv::highgui::wait_key(30).unwrap();
+
             Ok(gstreamer::FlowSuccess::Ok)
         }
     }
