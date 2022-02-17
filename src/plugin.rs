@@ -1,4 +1,7 @@
+use crate::filter::Filter;
 use crate::filter::FilterError;
+use crate::noopfilter::NoopFilter;
+use crate::rvmfilter::RVMFilter;
 use core::ffi::c_void;
 use gstreamer::glib;
 use gstreamer::prelude::*;
@@ -10,6 +13,7 @@ use gstreamer_base::subclass::base_transform::BaseTransformMode;
 use gstreamer_base::subclass::prelude::*;
 use gstreamer_video::{VideoFormat, VideoFrameRef, VideoInfo};
 use once_cell::sync::Lazy;
+use opencv::core::{Scalar, CV_8UC3};
 use opencv::prelude::*;
 use std::sync::Mutex;
 
@@ -33,7 +37,11 @@ mod imp {
     #[derive(Debug)]
     pub struct FakecamTransform {
         video_info: Mutex<VideoInfo>,
+        filter: Mutex<Box<dyn Filter>>,
+        bg_frame: Mutex<Mat>,
     }
+
+    const GREEN: Lazy<Scalar> = Lazy::new(|| Scalar::new(0.0, 255.0, 0.0, 255.0));
 
     impl Default for FakecamTransform {
         fn default() -> Self {
@@ -45,6 +53,15 @@ mod imp {
                     VideoInfo::builder(fmt, width, height)
                         .build()
                         .expect("Default video info for transform was invalid."),
+                ),
+                //filter: Mutex::new(Box::new(NoopFilter::default())),
+                filter: Mutex::new(Box::new(
+                    RVMFilter::new("/home/xeef/Projekte/fakecam2/models/rvm_mobilenetv3_fp32.onnx")
+                        .unwrap(),
+                )),
+                bg_frame: Mutex::new(
+                    Mat::new_rows_cols_with_default(height as i32, width as i32, CV_8UC3, *GREEN)
+                        .expect("Failed to create default background"),
                 ),
             }
         }
@@ -124,17 +141,24 @@ mod imp {
             let info_in = VideoInfo::from_caps(incaps)?;
             let info_out = VideoInfo::from_caps(outcaps)?;
             if info_in != info_out {
-                Err(gstreamer::loggable_error!(
+                return Err(gstreamer::loggable_error!(
                     &*FILTER_ERROR_CAT,
                     format!(
-                        "Input and output caps different. Input {:?}, Outoput {:?}",
+                        "Input and output caps different. Input {:?}, Output {:?}",
                         info_in, info_out
                     )
-                ))
+                ));
             } else {
-                *info = info_in;
-                Ok(())
+                *info = info_in.clone();
             }
+            // Resize green frame to new size
+            let mut bg_frame = self.bg_frame.lock().unwrap();
+            bg_frame
+                .resize_with_default(info_in.height() as usize, *GREEN)
+                .unwrap();
+            bg_frame.set_cols(info_in.width() as i32);
+
+            Ok(())
         }
         fn transform_ip(
             &self,
@@ -151,7 +175,6 @@ mod imp {
                 gstreamer::gst_error!(&*FILTER_ERROR_CAT, "Failed to extract video frame: {}", e);
                 Err(FlowError::Error)
             })?;
-            //println!("Frame: {:?} {}x{}x{}", frame.format(), frame.width(), frame.height(), frame.n_components());
             if frame.n_planes() != 1 {
                 gstreamer::gst_error!(
                     &*FILTER_ERROR_CAT,
@@ -172,7 +195,7 @@ mod imp {
                     );
                     Err(FlowError::Error)
                 })?;
-            let frame_mat = unsafe {
+            let mut frame_mat = unsafe {
                 opencv::core::Mat::new_rows_cols_with_data(
                     frame.height() as i32,
                     frame.width() as i32,
@@ -185,11 +208,33 @@ mod imp {
                 gstreamer::gst_error!(&*FILTER_ERROR_CAT, "Failed to decode as CV Mat: {}", e);
                 Err(FlowError::Error)
             })?;
-            //println!("Mat: {}x{}x{}", frame_mat.cols(), frame_mat.rows(), frame_mat.channels().unwrap());
-            //let mut mat_rgb = opencv::core::Mat::default();
-            //opencv::imgproc::cvt_color(&frame_mat, &mut mat_rgb, opencv::imgproc::COLOR_RGB2BGR, 0).unwrap();
-            //opencv::highgui::imshow("preview", &mat_rgb).unwrap();
-            //opencv::highgui::wait_key(30).unwrap();
+
+            {
+                let mut filter = self.filter.lock().or_else(|e| {
+                    gstreamer::gst_error!(
+                        &*FILTER_ERROR_CAT,
+                        "Failed to obtain filter lock: {}",
+                        e
+                    );
+                    Err(FlowError::Error)
+                })?;
+                let bg = self.bg_frame.lock().or_else(|e| {
+                    gstreamer::gst_error!(
+                        &*FILTER_ERROR_CAT,
+                        "Failed to obtain BG frame lock: {}",
+                        e
+                    );
+                    Err(FlowError::Error)
+                })?;
+
+                (*filter)
+                    .filter_inplace(&mut frame_mat, &*bg)
+                    .or_else(|e| {
+                        println!("Filter failed: {}", e);
+                        gstreamer::gst_error!(&*FILTER_ERROR_CAT, "Filtering failed: {}", e);
+                        Err(FlowError::Error)
+                    })?;
+            }
 
             Ok(gstreamer::FlowSuccess::Ok)
         }

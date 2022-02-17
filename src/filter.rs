@@ -1,5 +1,6 @@
 use opencv::prelude::*;
 use quick_error::quick_error;
+use core::fmt::Debug;
 
 quick_error!{
     #[derive(Debug)]
@@ -19,7 +20,7 @@ quick_error!{
     }
 }
 
-pub trait Filter {
+pub trait Filter: Debug + Send {
     fn filter_inplace(&mut self, src_image: &mut Mat, bg_image: &Mat) -> Result<(), FilterError>;
 
     fn filter(&mut self, src_image: &Mat, bg_image: &Mat) -> Result<Mat, FilterError> {

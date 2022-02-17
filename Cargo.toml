@@ -16,7 +16,7 @@ gstreamer-video = "0.17"
 gtk4 = "0.3"
 once_cell = "1.8"
 onnxruntime = { version = "0.0.14", optional = true }
-opencv = "0.57"
+opencv = "0.61"
 quick-error = "2"
 
 [features]
