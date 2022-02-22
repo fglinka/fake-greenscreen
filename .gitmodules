@@ -1,0 +1,3 @@
+[submodule "deps/onnxruntime"]
+	path = deps/onnxruntime
+	url = https://github.com/microsoft/onnxruntime.git
