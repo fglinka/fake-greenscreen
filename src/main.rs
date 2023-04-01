@@ -15,11 +15,11 @@ fn main() {
     gstreamer::init().unwrap();
     plugin::plugin_register_static().unwrap();
 
-    let src = gstreamer::ElementFactory::make("v4l2src", Some("src")).unwrap();
-    let cvt1 = gstreamer::ElementFactory::make("videoconvert", Some("cvt1")).unwrap();
-    let filter = gstreamer::ElementFactory::make("fakecam", Some("filter")).unwrap();
-    let cvt2 = gstreamer::ElementFactory::make("videoconvert", Some("cvt2")).unwrap();
-    let sink = gstreamer::ElementFactory::make("v4l2sink", Some("sink")).unwrap();
+    let src = gstreamer::ElementFactory::make_with_name("v4l2src", Some("src")).unwrap();
+    let cvt1 = gstreamer::ElementFactory::make_with_name("videoconvert", Some("cvt1")).unwrap();
+    let filter = gstreamer::ElementFactory::make_with_name("fakecam", Some("filter")).unwrap();
+    let cvt2 = gstreamer::ElementFactory::make_with_name("videoconvert", Some("cvt2")).unwrap();
+    let sink = gstreamer::ElementFactory::make_with_name("v4l2sink", Some("sink")).unwrap();
 
     let pipeline = gstreamer::Pipeline::new(Some("testpipeline"));
     pipeline

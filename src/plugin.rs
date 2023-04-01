@@ -76,6 +76,8 @@ mod imp {
 
     impl ObjectImpl for FakecamTransform {}
 
+    impl GstObjectImpl for FakecamTransform {}
+
     impl ElementImpl for FakecamTransform {
         fn metadata() -> Option<&'static ElementMetadata> {
             static METADATA: Lazy<ElementMetadata> = Lazy::new(|| {
@@ -133,7 +135,6 @@ mod imp {
 
         fn set_caps(
             &self,
-            _element: &Self::Type,
             incaps: &Caps,
             outcaps: &Caps,
         ) -> Result<(), gstreamer::LoggableError> {
@@ -162,21 +163,20 @@ mod imp {
         }
         fn transform_ip(
             &self,
-            _element: &Self::Type,
             buf: &mut gstreamer::BufferRef,
         ) -> Result<gstreamer::FlowSuccess, FlowError> {
             // Obtain lock on video info
             let info = self.video_info.lock().or_else(|e| {
-                gstreamer::gst_error!(&*FILTER_ERROR_CAT, "Failed to obtain mutex lock");
+                gstreamer::error!(&*FILTER_ERROR_CAT, "Failed to obtain mutex lock");
                 Err(FlowError::Error)
             })?;
             // Read out buffer as gstreamer-video VideoFrame
             let mut frame = VideoFrameRef::from_buffer_ref_writable(buf, &*info).or_else(|e| {
-                gstreamer::gst_error!(&*FILTER_ERROR_CAT, "Failed to extract video frame: {}", e);
+                gstreamer::error!(&*FILTER_ERROR_CAT, "Failed to extract video frame: {}", e);
                 Err(FlowError::Error)
             })?;
             if frame.n_planes() != 1 {
-                gstreamer::gst_error!(
+                gstreamer::error!(
                     &*FILTER_ERROR_CAT,
                     "Extracted frame has {} planes, should have 1",
                     frame.n_planes()
@@ -188,7 +188,7 @@ mod imp {
                 .plane_data_mut(0)
                 .map(|data| data.as_mut_ptr())
                 .or_else(|e| {
-                    gstreamer::gst_error!(
+                    gstreamer::error!(
                         &*FILTER_ERROR_CAT,
                         "Failed to read out frame plane: {}",
                         e
@@ -205,13 +205,13 @@ mod imp {
                 )
             }
             .or_else(|e| {
-                gstreamer::gst_error!(&*FILTER_ERROR_CAT, "Failed to decode as CV Mat: {}", e);
+                gstreamer::error!(&*FILTER_ERROR_CAT, "Failed to decode as CV Mat: {}", e);
                 Err(FlowError::Error)
             })?;
 
             {
                 let mut filter = self.filter.lock().or_else(|e| {
-                    gstreamer::gst_error!(
+                    gstreamer::error!(
                         &*FILTER_ERROR_CAT,
                         "Failed to obtain filter lock: {}",
                         e
@@ -219,7 +219,7 @@ mod imp {
                     Err(FlowError::Error)
                 })?;
                 let bg = self.bg_frame.lock().or_else(|e| {
-                    gstreamer::gst_error!(
+                    gstreamer::error!(
                         &*FILTER_ERROR_CAT,
                         "Failed to obtain BG frame lock: {}",
                         e
@@ -231,7 +231,7 @@ mod imp {
                     .filter_inplace(&mut frame_mat, &*bg)
                     .or_else(|e| {
                         println!("Filter failed: {}", e);
-                        gstreamer::gst_error!(&*FILTER_ERROR_CAT, "Filtering failed: {}", e);
+                        gstreamer::error!(&*FILTER_ERROR_CAT, "Filtering failed: {}", e);
                         Err(FlowError::Error)
                     })?;
             }

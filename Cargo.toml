@@ -10,14 +10,14 @@ publish = false
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-gstreamer = "0.17"
-gstreamer-base = "0.17"
-gstreamer-video = "0.17"
-gtk4 = "0.3"
-once_cell = "1.8"
+gstreamer = "^0.20.3"
+gstreamer-base = "^0.20.0"
+gstreamer-video = "^0.20.3"
+gtk4 = "^0.6.4"
+once_cell = "^1.17.1"
 onnxruntime = { version = "0.0.14", optional = true }
-opencv = "0.61"
-quick-error = "2"
+opencv = "^0.78.2"
+quick-error = "^2.0.1"
 
 [features]
 default = ["rvm"]
